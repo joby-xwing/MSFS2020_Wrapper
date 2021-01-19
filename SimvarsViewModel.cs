@@ -416,8 +416,8 @@ namespace Simvars
                             to_write["PLANE LATITUDE"] = lat;
                             to_write["PLANE LONGITUDE"] = lon;
                             to_write["PLANE ALTITUDE"] = alt_wgs;
-                            to_write["PLANE PITCH DEGREES"] = pitch;
-                            to_write["PLANE BANK DEGREES"] = roll;
+                            to_write["PLANE PITCH DEGREES"] = -1.0 * pitch;
+                            to_write["PLANE BANK DEGREES"] = -1.0 * roll;
                             to_write["PLANE HEADING DEGREES TRUE"] = yaw;
                         }
                     }
