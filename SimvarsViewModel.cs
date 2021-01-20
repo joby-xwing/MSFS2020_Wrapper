@@ -271,7 +271,7 @@ namespace Simvars
             cmdLoadFiles = new BaseCommand((p) => { LoadFiles(); });
             cmdSaveFile = new BaseCommand((p) => { SaveFile(false); });
 
-            m_oTimer.Interval = new TimeSpan(0, 0, 0, 1, 0);
+            m_oTimer.Interval = new TimeSpan(0, 0, 0, 0, 10);
             m_oTimer.Tick += new EventHandler(OnTick);
         }
         private void Connect()
@@ -392,11 +392,9 @@ namespace Simvars
             while (listener.Available > 0)
             {
                 byte[] bytes = listener.Receive(ref groupEP);
-                //Console.WriteLine($"Received broadcast from {groupEP} :");
-                //Console.WriteLine($" {Encoding.ASCII.GetString(bytes, 0, bytes.Length)}");
-                if (true)
+                const int VEHX_BYTE_SIZE = 5 + 4 + 8 * 3 + 4 * 3;
+                if (bytes.Length == VEHX_BYTE_SIZE)
                 {
-                    const int VEHX_BYTE_SIZE = 5 + 4 + 8 * 3 + 4 * 3;
 
                     string to_string = Encoding.ASCII.GetString(bytes, 0, bytes.Length);
                     if (to_string.StartsWith("VEHX"))
@@ -419,17 +417,40 @@ namespace Simvars
                             to_write["PLANE PITCH DEGREES"] = -1.0 * pitch;
                             to_write["PLANE BANK DEGREES"] = -1.0 * roll;
                             to_write["PLANE HEADING DEGREES TRUE"] = yaw;
+                        } else
+                        {
+                            //todo, how do we spawn and place intruders?
                         }
                     }
 
-                }
+                } else
+                {
+                    Console.WriteLine($"Unhandled broadcast from {groupEP} :");
+                    Console.WriteLine($" {Encoding.ASCII.GetString(bytes, 0, bytes.Length)}");
 
+                }
+            }
+
+            foreach (string key in to_write.Keys)
+            {
+                bool found = false;
+                foreach (SimvarRequest req in lSimvarRequests)
+                {
+                    if (req.sName == key)
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found)
+                {
+                    AddRequest(key, "amp");
+                }
             }
 
             foreach (SimvarRequest oSimvarRequest in lSimvarRequests)
             {
-                if (to_write.ContainsKey(oSimvarRequest.sName))
-                {
+                if (to_write.ContainsKey(oSimvarRequest.sName)) {
                     m_oSimConnect.SetDataOnSimObject(oSimvarRequest.eDef, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, to_write[oSimvarRequest.sName]);
                 }
             }
