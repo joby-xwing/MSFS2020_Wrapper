@@ -10,6 +10,7 @@ using System.Net.Sockets;
 
 using Microsoft.FlightSimulator.SimConnect;
 using System.Text;
+using System.Reflection;
 
 namespace Simvars
 {
@@ -22,11 +23,18 @@ namespace Simvars
     {
         Dummy = 0
     };
+    public enum DATA_DEFINE_ID
+    {
+        INTRUDER_1,
+        INTRUDER_REQ,
+        INTRUDER_LLA
+    };
 
     public class SimvarRequest : ObservableObject
     {
         public DEFINITION eDef = DEFINITION.Dummy;
         public REQUEST eRequest = REQUEST.Dummy;
+        public uint eObjectID = 0;  //0 corresponds to user
 
         public string sName { get; set; }
 
@@ -273,6 +281,8 @@ namespace Simvars
 
             m_oTimer.Interval = new TimeSpan(0, 0, 0, 0, 10);
             m_oTimer.Tick += new EventHandler(OnTick);
+
+            to_write[0] = new Dictionary<string, double>();
         }
         private void Connect()
         {
@@ -292,6 +302,8 @@ namespace Simvars
 
                 /// Catch a simobject data request
                 m_oSimConnect.OnRecvSimobjectDataBytype += new SimConnect.RecvSimobjectDataBytypeEventHandler(SimConnect_OnRecvSimobjectDataBytype);
+
+                m_oSimConnect.OnRecvAssignedObjectId += new SimConnect.RecvAssignedObjectIdEventHandler(SimConnect_OnRecvAssignedObjectId);
             }
             catch (COMException ex)
             {
@@ -335,6 +347,17 @@ namespace Simvars
             Disconnect();
             listener.Close();
         }
+        private void SimConnect_OnRecvAssignedObjectId(SimConnect sender, SIMCONNECT_RECV data)
+        {
+            //received new object with an ID, assume it is the most recently created aircraft
+            //need to get the aircraft id from this object id...=
+            uint object_id = (uint) data.GetType().GetField("dwObjectID").GetValue(data);
+            string intruder_name = intruder_ids[intruder_ids.Count - 1];
+
+            to_write[object_id] = new Dictionary<string, double>();
+
+            spawned_intruder_ids[intruder_name] = object_id;
+        }
 
         private void SimConnect_OnRecvException(SimConnect sender, SIMCONNECT_RECV_EXCEPTION data)
         {
@@ -343,7 +366,7 @@ namespace Simvars
 
             lErrorMessages.Add("SimConnect : " + eException.ToString());
         }
-
+        
         private void SimConnect_OnRecvSimobjectDataBytype(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA_BYTYPE data)
         {
             Console.WriteLine("SimConnect_OnRecvSimobjectDataBytype");
@@ -368,7 +391,9 @@ namespace Simvars
 
         // May not be the best way to achive regular requests.
         // See SimConnect.RequestDataOnSimObject
-        Dictionary<String, double> to_write = new Dictionary<string, double>();
+        Dictionary<uint, Dictionary<String, double>> to_write = new Dictionary<uint, Dictionary<string, double>>();
+        List<string> intruder_ids = new List<string>();
+        Dictionary<string, uint> spawned_intruder_ids = new Dictionary<string, uint>();
         private void OnTick(object sender, EventArgs e)
         {
             Console.WriteLine("OnTick");
@@ -393,10 +418,9 @@ namespace Simvars
             {
                 byte[] bytes = listener.Receive(ref groupEP);
                 const int VEHX_BYTE_SIZE = 5 + 4 + 8 * 3 + 4 * 3;
+                string to_string = Encoding.ASCII.GetString(bytes, 0, bytes.Length);
                 if (bytes.Length == VEHX_BYTE_SIZE)
                 {
-
-                    string to_string = Encoding.ASCII.GetString(bytes, 0, bytes.Length);
                     if (to_string.StartsWith("VEHX"))
                     {
                         //packges set of the following:
@@ -404,54 +428,104 @@ namespace Simvars
                         double lat = BitConverter.ToDouble(bytes, 5 + 4) * Math.PI / 180.0;
                         double lon = BitConverter.ToDouble(bytes, 5 + 4 + 8) * Math.PI / 180.0;
                         double alt_wgs = BitConverter.ToDouble(bytes, 5 + 4 + 8 * 2);
-                        float yaw = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3) * (float) Math.PI / 180.0f;
-                        float pitch = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3 + 4) * (float) Math.PI / 180.0f;
-                        float roll = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3 + 4 * 2) * (float) Math.PI / 180.0f;
+                        float yaw = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3) * (float)Math.PI / 180.0f;
+                        float pitch = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3 + 4) * (float)Math.PI / 180.0f;
+                        float roll = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3 + 4 * 2) * (float)Math.PI / 180.0f;
                         Console.WriteLine($"{bytes.Length} vs {VEHX_BYTE_SIZE} | {airplane_index} {lat} {lon} {alt_wgs} {yaw} {pitch} {roll}");
                         if (airplane_index == 0)
                         {
                             //position ownship
-                            to_write["PLANE LATITUDE"] = lat;
-                            to_write["PLANE LONGITUDE"] = lon;
-                            to_write["PLANE ALTITUDE"] = alt_wgs;
-                            to_write["PLANE PITCH DEGREES"] = -1.0 * pitch;
-                            to_write["PLANE BANK DEGREES"] = -1.0 * roll;
-                            to_write["PLANE HEADING DEGREES TRUE"] = yaw;
-                        } else
+                            to_write[0]["PLANE LATITUDE"] = lat;
+                            to_write[0]["PLANE LONGITUDE"] = lon;
+                            to_write[0]["PLANE ALTITUDE"] = alt_wgs;
+                            to_write[0]["PLANE PITCH DEGREES"] = -1.0 * pitch;
+                            to_write[0]["PLANE BANK DEGREES"] = -1.0 * roll;
+                            to_write[0]["PLANE HEADING DEGREES TRUE"] = yaw;
+                        }
+                        else
                         {
-                            //todo, how do we spawn and place intruders?
+                            string intruder_name = "n" + airplane_index;
+                            if (!intruder_ids.Contains(intruder_name))
+                            {
+                                SIMCONNECT_DATA_INITPOSITION init_pos = default;
+                                init_pos.Latitude = lat;
+                                init_pos.Longitude = lon;
+                                init_pos.Altitude = alt_wgs;
+                                init_pos.Bank = roll;
+                                init_pos.Heading = yaw;
+                                init_pos.Pitch = pitch;
+                                //airspeed shouldnt matter as sim is frozen, this object should be updated once a frame
+                                m_oSimConnect.AICreateNonATCAircraft("Boeing 747-8i Asobo", intruder_name, init_pos, null);
+                                intruder_ids.Add(intruder_name);
+                            }
+                            if (spawned_intruder_ids.ContainsKey(intruder_name))
+                            {
+                                uint objid = spawned_intruder_ids[intruder_name];
+                                to_write[objid]["PLANE LATITUDE"] = lat;
+                                to_write[objid]["PLANE LONGITUDE"] = lon;
+                                to_write[objid]["PLANE ALTITUDE"] = alt_wgs;
+                                to_write[objid]["PLANE PITCH DEGREES"] = -1.0 * pitch;
+                                to_write[objid]["PLANE BANK DEGREES"] = -1.0 * roll;
+                                to_write[objid]["PLANE HEADING DEGREES TRUE"] = yaw;
+                            }
                         }
                     }
-
-                } else
+                }
+                else if (to_string.StartsWith("DREF"))
+                {
+                    //the value in the dref message (see gazebo_xplane_plugin) is the 4 bytes after byte 5
+                    float value = BitConverter.ToSingle(bytes, 5);
+                    if (to_string.Contains("yoke_heading_ratio"))
+                    {
+                        to_write[0]["RUDDER POSITION"] = value;
+                        to_write[0]["RUDDER PEDAL POSITION"] = value;
+                    }
+                    else if (to_string.Contains("yoke_pitch_ratio"))
+                    {
+                        to_write[0]["ELEVATOR POSITION"] = value;
+                        to_write[0]["YOKE Y POSITION"] = value;
+                    }
+                    else if (to_string.Contains("yoke_roll_ratio"))
+                    {
+                        to_write[0]["AILERON POSITION"] = value;
+                        to_write[0]["YOKE X POSITION"] = value;
+                    }
+                    else if (to_string.Contains("throttle_ratio_all"))
+                    {
+                        to_write[0]["GENERAL ENG THROTTLE LEVER POSITION:1"] = value;
+                    }
+                }
+                else
                 {
                     Console.WriteLine($"Unhandled broadcast from {groupEP} :");
                     Console.WriteLine($" {Encoding.ASCII.GetString(bytes, 0, bytes.Length)}");
-
                 }
             }
 
-            foreach (string key in to_write.Keys)
+            foreach (uint obj_id in to_write.Keys)
             {
-                bool found = false;
-                foreach (SimvarRequest req in lSimvarRequests)
+                foreach (string key in to_write[obj_id].Keys)
                 {
-                    if (req.sName == key)
+                    bool found = false;
+                    foreach (SimvarRequest req in lSimvarRequests)
                     {
-                        found = true;
-                        break;
+                        if (req.sName == key && req.eObjectID == obj_id)
+                        {
+                            found = true;
+                            break;
+                        }
                     }
-                }
-                if (!found)
-                {
-                    AddRequest(key, "amp");
+                    if (!found)
+                    {
+                        AddRequest(key, "amp", obj_id);
+                    }
                 }
             }
 
             foreach (SimvarRequest oSimvarRequest in lSimvarRequests)
             {
-                if (to_write.ContainsKey(oSimvarRequest.sName)) {
-                    m_oSimConnect.SetDataOnSimObject(oSimvarRequest.eDef, SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, to_write[oSimvarRequest.sName]);
+                if (to_write[oSimvarRequest.eObjectID].ContainsKey(oSimvarRequest.sName)) {
+                    m_oSimConnect.SetDataOnSimObject(oSimvarRequest.eDef, oSimvarRequest.eObjectID > 0? oSimvarRequest.eObjectID : SimConnect.SIMCONNECT_OBJECT_ID_USER, SIMCONNECT_DATA_SET_FLAG.DEFAULT, to_write[oSimvarRequest.eObjectID][oSimvarRequest.sName]);
                 }
             }
         }
@@ -502,7 +576,7 @@ namespace Simvars
             }
         }
 
-        private void AddRequest(string _sOverrideSimvarRequest, string _sOverrideUnitRequest)
+        private void AddRequest(string _sOverrideSimvarRequest, string _sOverrideUnitRequest, uint object_id = 0)
         {
             Console.WriteLine("AddRequest");
 
@@ -513,6 +587,7 @@ namespace Simvars
             {
                 eDef = (DEFINITION)m_iCurrentDefinition,
                 eRequest = (REQUEST)m_iCurrentRequest,
+                eObjectID = object_id,
                 sName = sNewSimvarRequest,
                 sUnits = sNewUnitRequest
             };
