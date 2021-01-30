@@ -1,6 +1,11 @@
 # MSFS2020_Wrapper
 Duplicates Xplane's UDP-addressible interface for MSFS 2020.  Compile as part of MSFS 2020 SDK.
 
+To just run:
+1.  Install and start Microsoft Flight Simulator 2020, spawn in to KCCR with a Cessna 208b
+2.  Download the 'Debug' build in the bin/ folder, and start the exe therein
+3.  Set the host xplane host IP in QgroundControl or Gazebo to the host running MSFS and the adapter EXE.
+
 To build and run:
 1.  Install Microsoft Flight Simulator 2020
 2.  Install Visual Studio 2019 (Community version works fine)
