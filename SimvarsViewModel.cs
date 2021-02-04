@@ -279,7 +279,7 @@ namespace Simvars
             cmdLoadFiles = new BaseCommand((p) => { LoadFiles(); });
             cmdSaveFile = new BaseCommand((p) => { SaveFile(false); });
 
-            m_oTimer.Interval = new TimeSpan(0, 0, 0, 0, 10);
+            m_oTimer.Interval = new TimeSpan(0, 0, 0, 0, 5);
             m_oTimer.Tick += new EventHandler(OnTick);
 
             to_write[0] = new Dictionary<string, double>();
@@ -369,7 +369,7 @@ namespace Simvars
         
         private void SimConnect_OnRecvSimobjectDataBytype(SimConnect sender, SIMCONNECT_RECV_SIMOBJECT_DATA_BYTYPE data)
         {
-            Console.WriteLine("SimConnect_OnRecvSimobjectDataBytype");
+            //Console.WriteLine("SimConnect_OnRecvSimobjectDataBytype");
 
             uint iRequest = data.dwRequestID;
             uint iObject = data.dwObjectID;
@@ -391,15 +391,17 @@ namespace Simvars
 
         // May not be the best way to achive regular requests.
         // See SimConnect.RequestDataOnSimObject
+        const double FILTER_TC = 0.01;
         Dictionary<uint, Dictionary<String, double>> to_write = new Dictionary<uint, Dictionary<string, double>>();
         List<string> intruder_ids = new List<string>();
         Dictionary<string, uint> spawned_intruder_ids = new Dictionary<string, uint>();
         private void OnTick(object sender, EventArgs e)
         {
-            Console.WriteLine("OnTick");
+            //Console.WriteLine("OnTick");
 
             //bOddTick = !bOddTick;
 
+            /**
             foreach (SimvarRequest oSimvarRequest in lSimvarRequests)
             {
                 if (!oSimvarRequest.bPending)
@@ -411,7 +413,7 @@ namespace Simvars
                 {
                     oSimvarRequest.bStillPending = true;
                 }
-            }
+            }**/
 
             //every frame we set each of these manually identified IDs to the most recently recieved value from the TCP master
             while (listener.Available > 0)
@@ -431,16 +433,29 @@ namespace Simvars
                         float yaw = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3) * (float)Math.PI / 180.0f;
                         float pitch = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3 + 4) * (float)Math.PI / 180.0f;
                         float roll = BitConverter.ToSingle(bytes, 5 + 4 + 8 * 3 + 4 * 2) * (float)Math.PI / 180.0f;
-                        Console.WriteLine($"{bytes.Length} vs {VEHX_BYTE_SIZE} | {airplane_index} {lat} {lon} {alt_wgs} {yaw} {pitch} {roll}");
                         if (airplane_index == 0)
                         {
                             //position ownship
-                            to_write[0]["PLANE LATITUDE"] = lat;
-                            to_write[0]["PLANE LONGITUDE"] = lon;
-                            to_write[0]["PLANE ALTITUDE"] = alt_wgs;
-                            to_write[0]["PLANE PITCH DEGREES"] = -1.0 * pitch;
-                            to_write[0]["PLANE BANK DEGREES"] = -1.0 * roll;
-                            to_write[0]["PLANE HEADING DEGREES TRUE"] = yaw;
+                            if (!to_write[0].ContainsKey("PLANE LATITUDE"))
+                            {
+                                //position ownship for first timestep
+                                to_write[0]["PLANE LATITUDE"] = lat;
+                                to_write[0]["PLANE LONGITUDE"] = lon;
+                                to_write[0]["PLANE ALTITUDE"] = alt_wgs;
+                                to_write[0]["PLANE PITCH DEGREES"] = -1.0 * pitch;
+                                to_write[0]["PLANE BANK DEGREES"] = -1.0 * roll;
+                                to_write[0]["PLANE HEADING DEGREES TRUE"] = yaw;
+                            }
+                            else
+                            {
+                                //next timesteps apply a first ordser filter with FILTER_TC
+                                to_write[0]["PLANE LATITUDE"] = lat * (1.0 - FILTER_TC) + to_write[0]["PLANE LATITUDE"] * FILTER_TC;
+                                to_write[0]["PLANE LONGITUDE"] = lon * (1.0 - FILTER_TC) + to_write[0]["PLANE LONGITUDE"] * FILTER_TC;
+                                to_write[0]["PLANE ALTITUDE"] = alt_wgs * (1.0 - FILTER_TC) + to_write[0]["PLANE ALTITUDE"] * FILTER_TC;
+                                to_write[0]["PLANE PITCH DEGREES"] = -1.0 * pitch * (1.0 - FILTER_TC) + to_write[0]["PLANE PITCH DEGREES"] * FILTER_TC;
+                                to_write[0]["PLANE BANK DEGREES"] = -1.0 * roll * (1.0 - FILTER_TC) + to_write[0]["PLANE BANK DEGREES"] * FILTER_TC;
+                                to_write[0]["PLANE HEADING DEGREES TRUE"] = yaw * (1.0 - FILTER_TC) + to_write[0]["PLANE HEADING DEGREES TRUE"] * FILTER_TC;
+                            }
                         }
                         else
                         {
